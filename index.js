@@ -1,86 +1,75 @@
-const express = require('express');
-const fetch = require('node-fetch');
-const multer = require('multer');
-const FormData = require('form-data');
-
+const express = require("express");
+const fetch = require("node-fetch");
+const FormData = require("form-data");
 const app = express();
+
 app.use(express.json());
 
 // Daftar harga ress
-const ressPricing = {
-    100: 5000,  // 10 ress = 5000 IDR
-    170: 10000, // 25 ress = 12000 IDR
-    250: 15000, // 50 ress = 23000 IDR
-    320: 20000 // 100 ress = 45000 IDR
+const hargaRess = {
+    100: 5000,  
+    200: 9000,  
+    500: 20000  
 };
 
-app.post('/webhook/trakteer', async (req, res) => {
+app.post("/webhook/saweria", async (req, res) => {
+    const data = req.body.data; // Data utama dari Saweria
+
+    if (!data || !data.message || !data.amount) {
+        return res.status(400).json({ success: false, message: "Data tidak valid" });
+    }
+
+    // Ambil email dan jumlah ress dari pesan
+    const message = data.message;
+    const emailMatch = message.match(/[\w.-]+@[\w.-]+\.\w+/);
+    const ressMatch = message.match(/\d+/);
+
+    if (!emailMatch || !ressMatch) {
+        return res.status(400).json({ success: false, message: "Format pesan salah" });
+    }
+
+    const email = emailMatch[0];
+    const jumlahRess = parseInt(ressMatch[0]);
+    const jumlahBayar = parseInt(data.amount);
+
+    console.log(`Email: ${email}, Jumlah Ress: ${jumlahRess}, Dibayar: ${jumlahBayar}`);
+
+    // Cek apakah jumlah pembayaran cocok dengan harga ress
+    let ressYangDidapat = 0;
+
+    for (const [ress, harga] of Object.entries(hargaRess)) {
+        if (jumlahBayar >= harga) {
+            ressYangDidapat = ress;
+        }
+    }
+
+    if (ressYangDidapat === 0) {
+        return res.status(400).json({ success: false, message: "Jumlah pembayaran tidak valid" });
+    }
+
+    // Kirim email ke API Panel
     try {
-        const data = req.body;
-        
-        // Pastikan webhook berasal dari Trakteer
-        if (!data || data.status !== 'success') {
-            return res.status(400).json({ message: 'Invalid webhook data' });
-        }
-
-        // Ambil pesan dan jumlah pembayaran dari donasi
-        const message = data.message || '';
-        const amountPaid = data.amount || 0;
-
-        const match = message.match(/Email: (\S+)/i);
-        const ressMatch = message.match(/Ress: (\d+)/i);
-        
-        if (!match || !ressMatch) {
-            return res.status(400).json({ message: 'Email atau jumlah ress tidak ditemukan dalam pesan' });
-        }
-
-        const email = match[1];
-        let requestedRess = parseInt(ressMatch[1], 10);
-
-        // Cek apakah harga yang dibayarkan cocok dengan daftar harga
-        let finalRess = 0;
-        let closestRess = null;
-
-        for (const [ress, price] of Object.entries(ressPricing)) {
-            if (amountPaid === price) {
-                finalRess = parseInt(ress);
-                break;
-            } else if (amountPaid > price) {
-                closestRess = parseInt(ress);
-            }
-        }
-
-        if (finalRess === 0 && closestRess !== null) {
-            finalRess = closestRess;
-        }
-
-        if (finalRess === 0) {
-            return res.status(400).json({ message: 'Jumlah pembayaran tidak sesuai dengan harga ress yang tersedia' });
-        }
-
-        // Kirim data ke API panel
         const formData = new FormData();
-        formData.append('email', email);
-        formData.append('ress', finalRess);
-        
-        const apiResponse = await fetch(`https://${global.paneljasteb}/panel/add`, {
-            method: 'POST',
+        formData.append("email", email);
+        formData.append("amount", ressYangDidapat);
+
+        const apiResponse = await fetch("https://fazz.cloud77.biz.id/panel/add", {
+            method: "POST",
             body: formData,
             headers: formData.getHeaders(),
         });
 
-        if (!apiResponse.ok) {
-            throw new Error(`Gagal menambahkan email ke API: ${apiResponse.statusText}`);
-        }
+        const responseData = await apiResponse.json();
+        console.log("Response API Panel:", responseData);
 
-        res.status(200).json({ message: 'Success', email, ress: finalRess });
+        res.status(200).json({ success: true, message: `Ress ${ressYangDidapat} ditambahkan untuk ${email}` });
     } catch (error) {
-        console.error('Error handling webhook:', error);
-        res.status(500).json({ message: 'Internal Server Error' });
+        console.error("Error saat menghubungi API Panel:", error);
+        res.status(500).json({ success: false, message: "Gagal menambahkan ke panel" });
     }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 app.listen(PORT, () => {
-    console.log(`Webhook server running on port ${PORT}`);
+    console.log(`Webhook berjalan di port ${PORT}`);
 });
